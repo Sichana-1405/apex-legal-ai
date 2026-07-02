@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "local-file-sandbox": {
+      "command": "python",
+      "args": ["-m", "mcp.server"],
+      "env": {
+        "MCP_WORKSPACE_DIR": "./data",
+        "LOG_LEVEL": "INFO"
+      }
+    }
+  }
+}

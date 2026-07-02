@@ -1,0 +1,28 @@
+# Google ADK Orchestrator Configurations
+orchestrator:
+  name: "ApexLegalOrchestrator"
+  max_iterations: 15
+  memory_limit: 100
+
+model:
+  provider: "google"
+  name: "gemini-1.5-pro"
+  temperature: 0.1
+  max_output_tokens: 4096
+
+agents:
+  security:
+    enabled: true
+    temperature: 0.0
+  evidence:
+    enabled: true
+    temperature: 0.1
+  analysis:
+    enabled: true
+    temperature: 0.2
+  campaign:
+    enabled: true
+    temperature: 0.2
+  report:
+    enabled: true
+    temperature: 0.3

@@ -1,0 +1,17 @@
+[project]
+name = "apex-legal-ai"
+version = "0.1.0"
+description = "A multi-agent assistant that helps legal teams investigate online harassment cases."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "streamlit>=1.30.0",
+    "pydantic>=2.0.0",
+    "google-genai>=0.1.0",
+    "python-dotenv>=1.0.0",
+    "mcp>=1.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
