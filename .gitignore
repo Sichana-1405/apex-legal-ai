@@ -12,11 +12,9 @@ ENV/
 env.bak/
 venv.bak/
 
-# Project Specific
+# Project Specific - only ignore user-uploaded data CSVs outside of sample
 sample_data/*.csv
 !sample_data/sample_comments.csv
-screenshots/*.png
-!screenshots/.keep
 docs/_build/
 
 # Distribution / packaging
