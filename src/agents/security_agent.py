@@ -21,9 +21,10 @@ class SecurityAgent:
     )
     
     # Phone number regex supporting various international and national formats:
-    # Matches patterns like +1-555-555-5555, (555) 555-5555, 555.555.5555, etc.
+    # Matches patterns like +1-555-555-5555, (555) 555-5555, 555.555.5555, 5555555555.
+    # It avoids capturing leading spaces before the phone number.
     PHONE_REGEX = re.compile(
-        r'\b(?:\+?(\d{1,3}))?[-. (]*(\d{3})[-. )]*(\d{3})[-. ]*(\d{4})\b'
+        r'\b(?:\+?\d{1,3}[-. ]*)?\(?\d{3}\)?[-. ]*\d{3}[-. ]*\d{4}\b'
     )
 
     def __init__(self) -> None:

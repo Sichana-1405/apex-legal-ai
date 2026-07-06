@@ -4,10 +4,7 @@
 # and assembles a professional Markdown investigation report.  The report is stored
 # in state.report_draft_markdown and is never written to disk by this agent —
 # file export is delegated to the MCP layer per workspace policy.
-import os
 
-print("Running report_agent from:")
-print(os.path.abspath(__file__))
 import logging
 import re
 import textwrap
@@ -40,7 +37,7 @@ _SEVERITY_LABELS: Dict[str, str] = {
 
 # Category-to-confidence mapping: defines normalized confidence scores for
 # each category when the API does not provide explicit confidence.
-# These values reflect our confidence in classification accuracy per category.
+# These values reflect our confidence in local heuristics and classification accuracy.
 _CATEGORY_CONFIDENCE_MAP: Dict[str, float] = {
     "Threat": 0.95,                    # Highest confidence for explicit threats
     "Hate Speech": 0.92,               # Strong confidence for hate speech detection
@@ -57,14 +54,22 @@ _MAX_EVIDENCE_ROWS = 50
 # Width (in characters) used when wrapping long comment excerpts.
 _EXCERPT_WRAP_WIDTH = 100
 
-# Entity extraction regex patterns for different entity types
+# Entity extraction regex patterns
 _ENTITY_PATTERNS = {
     "email": re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'),
     "url": re.compile(r'https?://[^\s]+|www\.[^\s]+'),
     "phone": re.compile(r'\+?1?\s*\(?[0-9]{3}\)?[\s.-]?[0-9]{3}[\s.-]?[0-9]{4}'),
     "hashtag": re.compile(r'#[A-Za-z0-9_]+'),
     "mention": re.compile(r'@[A-Za-z0-9_]+'),
+    "username": re.compile(r'\b(?:user|account|profile)_?[A-Za-z0-9_]+\b', re.IGNORECASE),
 }
+
+# Maximum number of individual evidence rows to render verbatim in the
+# Evidence Summary section.  Keeps the report readable when datasets are large.
+_MAX_EVIDENCE_ROWS = 50
+
+# Width (in characters) used when wrapping long comment excerpts.
+_EXCERPT_WRAP_WIDTH = 100
 
 
 def _classified_records(state: InvestigationState) -> List[Any]:
@@ -91,6 +96,7 @@ def _extract_entities_from_text(text: str) -> Dict[str, Set[str]]:
         "phone": set(),
         "hashtag": set(),
         "mention": set(),
+        "username": set(),
     }
 
     for entity_type, pattern in _ENTITY_PATTERNS.items():
@@ -306,7 +312,7 @@ def _build_statistics(
 
 def _build_campaign_section(state: InvestigationState) -> str:
     """
-    Build the campaign detection section with enriched cluster details.
+    Build the campaign detection section from state.campaign_clusters.
 
     The CampaignAgent stores its cluster map in state.campaign_clusters as
     Dict[str, List[str]] (cluster_id → [comment_index_strings]).  This section
@@ -355,10 +361,7 @@ def _build_campaign_section(state: InvestigationState) -> str:
             # Extract sample comment text from the first member
             sample_comment_idx = int(member_indices[0])
             if sample_comment_idx < len(comments):
-               sample_text = _truncate(
-    comments[sample_comment_idx].comment_text or "",
-    80,
-)
+                sample_text = _truncate(comments[sample_comment_idx].comment or "", 80)
             else:
                 sample_text = "(comment text unavailable)"
 
@@ -429,18 +432,59 @@ def _build_campaign_section(state: InvestigationState) -> str:
 
 def _build_evidence_summary(state: InvestigationState) -> str:
     """
-    Build the evidence summary section with enriched columns.
+    Build the evidence summary section.
 
     Renders a paginated GFM table of sanitised comments (capped at
     _MAX_EVIDENCE_ROWS to keep the report readable).  Comments are sorted
     by detected severity (highest first) so reviewers see the most
     concerning items at the top.
 
-    Each row includes: index, platform, username, timestamp, category,
-    severity, confidence, comment excerpt (60 chars), and explanation.
+    Each row includes: row index, platform, username, timestamp,
+    category, severity, and a truncated comment excerpt.
     """
     records = _classified_records(state)
     comments = state.sanitized_comments
+
+    if records:
+        def _sort_record_clean(record: Any) -> Tuple:
+            try:
+                sev = int(getattr(record, "severity", None) or 0)
+            except (ValueError, TypeError):
+                sev = 0
+            return (-sev, getattr(record, "category", "") or "")
+
+        sorted_records = sorted(records, key=_sort_record_clean)
+        display_records = sorted_records[:_MAX_EVIDENCE_ROWS]
+        truncation_notice = ""
+        if len(sorted_records) > _MAX_EVIDENCE_ROWS:
+            truncation_notice = (
+                f"\n> **Table truncated.** Showing {_MAX_EVIDENCE_ROWS} of "
+                f"{len(sorted_records)} comments (sorted by severity, highest first).\n\n"
+            )
+
+        rows: List[str] = []
+        for idx, record in enumerate(display_records, start=1):
+            primary_cat = getattr(record, "category", None) or "-"
+            cat_display = f"{_category_emoji(primary_cat)} {primary_cat}"
+            rows.append(
+                f"| {idx} "
+                f"| {_escape_md(getattr(record, 'platform', '') or '')} "
+                f"| {_escape_md(getattr(record, 'username', '') or '')} "
+                f"| {_fmt_dt(getattr(record, 'timestamp', None))} "
+                f"| {_escape_md(cat_display)} "
+                f"| {_severity_badge(_record_severity(record))} "
+                f"| {_confidence_display(getattr(record, 'confidence', None))} "
+                f"| {_escape_md(_truncate(getattr(record, 'comment', '') or '', 120))} |"
+            )
+
+        return (
+            "---\n\n"
+            "## 📋 Evidence Summary\n"
+            f"{truncation_notice}"
+            "| # | Platform | Username | Timestamp | Category | Severity | Confidence | Comment Excerpt |\n"
+            "|---|---|---|---|---|---|---|---|\n"
+            f"{chr(10).join(rows)}\n"
+        )
 
     if records:
         def _sort_record(record: Any) -> Tuple:
@@ -455,38 +499,39 @@ def _build_evidence_summary(state: InvestigationState) -> str:
         truncation_notice = ""
         if len(sorted_records) > _MAX_EVIDENCE_ROWS:
             truncation_notice = (
-                f"\n> **Table truncated.** Showing {_MAX_EVIDENCE_ROWS} of "
-                f"{len(sorted_records)} comments (sorted by severity, highest first).\n\n"
+                f"\n> âš ï¸ **Table truncated.** Showing {_MAX_EVIDENCE_ROWS} of "
+                f"{len(sorted_records)} comments (sorted by severity, highest first). "
+                f"The full dataset is available in the pipeline audit log.\n"
             )
 
         rows: List[str] = []
         for idx, record in enumerate(display_records, start=1):
-            primary_cat = getattr(record, "category", None) or "-"
+            primary_cat = getattr(record, "category", None) or "â€”"
+            severity = _record_severity(record)
             cat_display = f"{_category_emoji(primary_cat)} {primary_cat}"
-            confidence = getattr(record, "confidence", None)
-            explanation = getattr(record, "explanation", None) or "-"
-            comment_text = getattr(record, "comment", "") or ""
-
-            rows.append(
+            row = (
                 f"| {idx} "
                 f"| {_escape_md(getattr(record, 'platform', '') or '')} "
                 f"| {_escape_md(getattr(record, 'username', '') or '')} "
                 f"| {_fmt_dt(getattr(record, 'timestamp', None))} "
                 f"| {_escape_md(cat_display)} "
-                f"| {_severity_badge(_record_severity(record))} "
-                f"| {_confidence_display(confidence, primary_cat)} "
-                f"| {_escape_md(_truncate(comment_text, 60))} "
-                f"| {_escape_md(_truncate(explanation, 80))} |"
+                f"| {_severity_badge(severity)} "
+                f"| {_escape_md(_truncate(getattr(record, 'comment', '') or '', 120))} |"
             )
+            rows.append(row)
 
-        return (
-            "---\n\n"
-            "## 📋 Evidence Summary\n"
-            f"{truncation_notice}"
-            "| # | Platform | Username | Timestamp | Category | Severity | Confidence | Comment | Explanation |\n"
-            "|---|---|---|---|---|---|---|---|---|\n"
-            f"{chr(10).join(rows)}\n"
-        )
+        table_body = "\n".join(rows)
+
+        return textwrap.dedent(f"""\
+            ---
+
+            ## ðŸ“‹ Evidence Summary
+            {truncation_notice}
+            | # | Platform | Username | Timestamp | Category | Severity | Comment Excerpt |
+            |---|---|---|---|---|---|---|
+            {table_body}
+
+        """)
 
     if not comments:
         return textwrap.dedent("""\
@@ -498,45 +543,40 @@ def _build_evidence_summary(state: InvestigationState) -> str:
 
         """)
 
-    # Fallback: display from CommentData when no records
-    return textwrap.dedent("""\
-        ---
-
-        ## 📋 Evidence Summary
-
-        No analysed evidence records available (pipeline may not have completed).
-
-    """)
-
 
 def _build_analysis_summary(
     state: InvestigationState,
     harmful_count: int,
+    category_counter: Counter,
 ) -> str:
     """
-    Build the AI analysis summary section — narrative interpretation
-    of the statistical findings.
+    Build the AI-generated analysis summary narrative section.
+
+    This section synthesises the quantitative statistics into a prose
+    summary paragraph, highlights the dominant harm categories, lists
+    extracted entity types, and surfaces the top affected platforms.
+
+    All language in this section is objective and clinical in compliance
+    with workspace policy.  No legal conclusions are drawn.
     """
     total = len(state.sanitized_comments)
-    records = _classified_records(state)
 
-    # Determine the most common harmful category
-    harmful_categories = Counter()
-    for record in records:
-        cat = getattr(record, "category", None)
-        if cat and cat in _HARMFUL_CATEGORIES:
-            harmful_categories[cat] += 1
-
-    dominant_harmful = harmful_categories.most_common(1)[0][0] if harmful_categories else "N/A"
-    dominant_harmful_str = f"**{dominant_harmful}**" if dominant_harmful != "N/A" else "N/A"
+    # Compute top-3 harmful categories for the narrative
+    harmful_cats = {
+        k: v for k, v in category_counter.items() if k in _HARMFUL_CATEGORIES
+    }
+    top_harmful = sorted(harmful_cats.items(), key=lambda x: -x[1])[:3]
     top_harmful_str = (
-        ", ".join(f"{cat} ({n})" for cat, n in harmful_categories.most_common(3))
-        if harmful_categories
-        else "None"
+        ", ".join(f"**{cat}** ({count})" for cat, count in top_harmful)
+        if top_harmful else "none identified"
+    )
+    dominant_harmful_str = (
+        f"**{top_harmful[0][0]}** ({top_harmful[0][1]})"
+        if top_harmful else "none identified"
     )
 
-    # Platform frequency
-    platform_counter = Counter(
+    # Platform distribution
+    platform_counter: Counter = Counter(
         c.platform for c in state.sanitized_comments if c.platform
     )
     top_platforms = platform_counter.most_common(3)
@@ -650,6 +690,20 @@ def _build_human_review_section(
 
     checklist_str = "\n".join(checklist_items)
 
+    return (
+        "---\n\n"
+        "## 👁️ Human Review Required\n\n"
+        "This AI-generated report **must be reviewed by a qualified human** before\n"
+        "any action is taken. The following checklist items require attention:\n\n"
+        f"{checklist_str}\n\n"
+        "| Review Item | Status |\n"
+        "|---|---|\n"
+        "| AI classification spot-checked | ☐ Pending |\n"
+        "| Source dataset verified | ☐ Pending |\n"
+        "| Campaign clusters confirmed | ☐ Pending |\n"
+        "| Case manager sign-off | ☐ Pending |\n"
+    )
+
     return textwrap.dedent(f"""\
         ---
 
@@ -719,39 +773,60 @@ def _assemble_report(state: InvestigationState, generated_at: str) -> str:
     """
     Coordinate all section builders into a single coherent Markdown document.
 
+    This function is responsible for computing the shared aggregate metrics
+    (harmful_count, category_counter, severity_counter) once and passing
+    them to each section builder that needs them, avoiding redundant iteration.
+
     Args:
-        state: The fully-populated InvestigationState from the pipeline.
-        generated_at: Timestamp string for report generation time.
+        state:        Completed InvestigationState from the pipeline.
+        generated_at: Pre-computed UTC timestamp string for the report header.
 
     Returns:
-        A single Markdown string ready for export or display.
+        The complete Markdown report as a single string.
     """
-    records = _classified_records(state)
-    comments = state.sanitized_comments
-
-    # Compute statistics for the section builders
-    harmful_count = 0
+    # ------------------------------------------------------------------ #
+    # Pre-compute aggregate metrics from sanitised comments once.
+    # CommentData.categories stores the list of analysis categories set by
+    # the Analysis Agent; CommentData.severity stores the severity_score string.
+    # ------------------------------------------------------------------ #
     category_counter: Counter = Counter()
     severity_counter: Counter = Counter()
+    harmful_count = 0
 
+    records = _classified_records(state)
     if records:
         for record in records:
-            cat = getattr(record, "category", None)
-            sev = _record_severity(record)
-            if cat in _HARMFUL_CATEGORIES:
-                harmful_count += 1
-            if cat:
-                category_counter[cat] += 1
-            if sev:
-                severity_counter[sev] += 1
+            category = getattr(record, "category", None)
+            if category:
+                category_counter[category] += 1
+                if category in _HARMFUL_CATEGORIES:
+                    harmful_count += 1
 
-    # Assemble all sections
+            severity = _record_severity(record)
+            if severity:
+                severity_counter[severity.strip()] += 1
+    else:
+        for comment in state.sanitized_comments:
+            # Count every category label the comment was tagged with
+            for cat in comment.categories:
+                category_counter[cat] += 1
+                if cat in _HARMFUL_CATEGORIES:
+                    harmful_count += 1
+                    break  # count each comment at most once as "harmful"
+
+            # Track severity distribution
+            if comment.severity:
+                severity_counter[comment.severity.strip()] += 1
+
+    # ------------------------------------------------------------------ #
+    # Assemble sections in document order
+    # ------------------------------------------------------------------ #
     sections = [
         _build_header(state, generated_at),
         _build_statistics(state, harmful_count, category_counter, severity_counter),
         _build_campaign_section(state),
         _build_evidence_summary(state),
-        _build_analysis_summary(state, harmful_count),
+        _build_analysis_summary(state, harmful_count, category_counter),
         _build_human_review_section(state, harmful_count),
         _build_disclaimer(),
     ]
@@ -760,46 +835,128 @@ def _assemble_report(state: InvestigationState, generated_at: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# ReportAgent class
+# Agent
 # ---------------------------------------------------------------------------
 
 class ReportAgent:
     """
-    Generates structured investigation reports from completed InvestigationState.
+    Report Agent for Apex Legal AI.
 
-    The ReportAgent is the final stage of the five-agent pipeline. It receives
-    a fully-populated InvestigationState (after Campaign Agent has run) and
-    assembles a professional Markdown report summarising all findings.
+    Receives the fully-populated ``InvestigationState`` after the Campaign Agent
+    and generates a professional Markdown investigation report, which is stored
+    back in ``state.report_draft_markdown``.
+
+    The agent is entirely stateless — all information is derived from the
+    ``InvestigationState`` fields populated by upstream pipeline agents:
+
+    - ``state.raw_comments``          → total raw input volume
+    - ``state.sanitized_comments``    → per-comment category, severity, text
+    - ``state.campaign_clusters``     → cluster map from CampaignAgent
+    - ``state.extracted_entities``    → entity extraction results
+    - ``state.case_id / case_name``   → case identification metadata
+
+    Report Sections
+    ---------------
+    1. Report header and case metadata
+    2. Statistical summary (counts, category breakdown, severity distribution)
+    3. Campaign detection results and cluster inventory
+    4. Evidence summary table (capped, sorted by severity)
+    5. AI analysis summary narrative
+    6. Human Review Required checklist
+    7. Legal disclaimer (mandatory)
+
+    Compliance
+    ----------
+    - All generated text is objective and clinical; no legal conclusions are drawn.
+    - The legal disclaimer is always appended and cannot be suppressed.
+    - No files are written to disk; output is stored only in state per MCP policy.
     """
 
-    def __init__(self):
-        self.logger = logging.getLogger(__name__)
+    def __init__(self) -> None:
+        """Initialise the ReportAgent.  No external dependencies are required."""
+        pass
+
+    def generate_report(self, state: InvestigationState) -> str:
+        """
+        Generate the full Markdown investigation report synchronously.
+
+        Useful for calling outside of the ADK pipeline context — for example,
+        in unit tests or when the report needs to be regenerated with the same
+        state.
+
+        Args:
+            state: Completed ``InvestigationState`` from all upstream pipeline agents.
+
+        Returns:
+            The full Markdown report as a UTF-8 string.
+
+        Raises:
+            TypeError: If *state* is not an ``InvestigationState`` instance.
+        """
+        if not isinstance(state, InvestigationState):
+            raise TypeError(
+                f"ReportAgent.generate_report() expected InvestigationState, "
+                f"got {type(state).__name__!r}."
+            )
+
+        # Capture generation timestamp once so all sections share the same value
+        generated_at = _now_utc_iso()
+
+        logger.info(
+            "ReportAgent generating report for case '%s' (%d sanitized comments, "
+            "%d clusters) at %s",
+            state.case_id,
+            len(state.sanitized_comments),
+            len(state.campaign_clusters),
+            generated_at,
+        )
+
+        report_md = _assemble_report(state, generated_at)
+
+        logger.info(
+            "ReportAgent: report generated — %d characters, %d lines.",
+            len(report_md),
+            report_md.count("\n"),
+        )
+
+        return report_md
 
     async def run(self, state: InvestigationState) -> InvestigationState:
         """
-        Generate the investigation report and populate state.report_draft_markdown.
+        ADK-compliant pipeline execution interface.
+
+        Generates the full investigation report and stores it in
+        ``state.report_draft_markdown``.  Returns the updated state object.
+
+        If a ``[PIPELINE ERROR]`` block is already present in
+        ``state.report_draft_markdown`` (written by the orchestrator's error
+        boundary), the report is **prepended** to preserve the error context
+        rather than silently overwriting it.
 
         Args:
-            state: Completed investigation state with all agent outputs populated.
+            state: The shared ``InvestigationState`` passed from the Campaign Agent.
 
         Returns:
-            Updated state with report_draft_markdown populated.
+            The updated ``InvestigationState`` with ``report_draft_markdown`` populated.
         """
-        try:
-            generated_at = _now_utc_iso()
-            report_markdown = _assemble_report(state, generated_at)
-            state.report_draft_markdown = report_markdown
-            self.logger.info(
-                f"Report generated successfully for case {state.case_id}. "
-                f"Report size: {len(report_markdown)} characters."
-            )
-        except Exception as e:
-            self.logger.error(f"Failed to generate report: {e}", exc_info=True)
+        # Consolidates timelines and campaign details into a structured markdown report draft.
+        report_md = self.generate_report(state)
+
+        # Preserve any existing error context written by the orchestrator's
+        # error boundary (prefixed with "[PIPELINE ERROR]").
+        if state.report_draft_markdown and "[PIPELINE ERROR]" in state.report_draft_markdown:
             state.report_draft_markdown = (
-                f"# ❌ Report Generation Failed\n\n"
-                f"An error occurred while generating the investigation report:\n\n"
-                f"```\n{str(e)}\n```\n\n"
-                f"Please review the pipeline logs for detailed error information."
+                report_md + "\n\n---\n\n" + state.report_draft_markdown
             )
+        else:
+            # Normal path: overwrite any stale draft with the freshly generated report
+            state.report_draft_markdown = report_md
+
+        logger.info(
+            "ReportAgent.run() completed for case '%s'. "
+            "report_draft_markdown set (%d chars).",
+            state.case_id,
+            len(state.report_draft_markdown),
+        )
 
         return state
