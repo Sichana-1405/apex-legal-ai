@@ -39,14 +39,19 @@ Digital platforms are overwhelmed with unstructured data, making it nearly impos
 
 <div align="center">
 
-*Dashboard Overview*
-![Dashboard Screenshot](screenshots/dashboard_placeholder.png)
+## 🖼️ Screenshots
 
-*AI Evidence Classification*
-![Classification Screenshot](screenshots/classification_placeholder.png)
+### Dashboard
+![Dashboard](screenshots/dashboard.png)
 
-*Automated Investigation Report*
-![Report Screenshot](screenshots/report_placeholder.png)
+### Upload Comments
+![Upload](screenshots/upload.png)
+
+### Investigation Report
+![Report](screenshots/report.png)
+
+### System Architecture
+![Architecture](screenshots/architecture.png)
 
 </div>
 
