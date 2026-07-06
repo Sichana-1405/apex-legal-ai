@@ -90,6 +90,16 @@ graph TD
 
 ---
 
+## 🏗️ Architecture Diagram
+
+<div align="center">
+
+![Architecture](screenshots/architecture.png)
+
+</div>
+
+---
+
 ## 🛠️ Technologies Used
 
 | Category | Technologies |
@@ -213,6 +223,13 @@ The system expects a CSV file containing social media comments. See `sample_data
 - **Explainability (XAI)**: Add highlighting to specific words inside the comment that triggered the LLM's classification.
 
 ---
+## Responsible AI
+
+Apex Legal AI provides decision support only.
+
+All AI-generated classifications require human verification before legal or moderation action is taken.
+
+The system is designed to minimize automation bias by including confidence scores, explanations, and mandatory human review.
 
 ## 📜 License
 This project is licensed under the [MIT License](LICENSE).
