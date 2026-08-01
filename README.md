@@ -37,10 +37,6 @@ Digital platforms are overwhelmed with unstructured data, making it nearly impos
 
 ## 🖼️ Screenshots
 
-<div align="center">
-
-## 🖼️ Screenshots
-
 ### Dashboard
 ![Dashboard](screenshots/dashboard.png)
 
@@ -241,3 +237,11 @@ This project is licensed under the [MIT License](LICENSE).
 
 ## 👨‍💻 Author
 **Apex Legal AI Team** — Built as a Capstone Project demonstrating advanced Multi-Agent architectures with Google ADK & Gemini.
+
+## ✅ Course Concepts Demonstrated
+
+- Multi-Agent System using Google ADK
+- MCP Server integration
+- Gemini LLM for semantic classification
+- Security features (input sanitization, PII scrubbing, prompt injection defense)
+- Deployable architecture using FastAPI and Streamlit
