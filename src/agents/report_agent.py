@@ -4,10 +4,7 @@
 # and assembles a professional Markdown investigation report.  The report is stored
 # in state.report_draft_markdown and is never written to disk by this agent —
 # file export is delegated to the MCP layer per workspace policy.
-import os
 
-print("Running report_agent from:")
-print(os.path.abspath(__file__))
 import logging
 import re
 import textwrap
