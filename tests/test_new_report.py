@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Quick validation test for the enhanced report_agent."""
+"""Validation tests for the enhanced report_agent helper functions."""
 
 from src.agents.report_agent import (
     _confidence_display,
@@ -8,50 +8,51 @@ from src.agents.report_agent import (
     _extract_entities_from_text,
 )
 
-# Test 1: Confidence display with category mapping
-print("=" * 60)
-print("Test 1: Confidence Display with Category Mapping")
-print("=" * 60)
-print(f"Threat confidence (no explicit value): {_confidence_display(None, 'Threat')}")
-print(f"Hate Speech confidence: {_confidence_display(None, 'Hate Speech')}")
-print(f"Harassment confidence: {_confidence_display(None, 'Harassment')}")
-print(f"Spam confidence: {_confidence_display(None, 'Spam')}")
-print(f"Safe confidence: {_confidence_display(None, 'Safe')}")
-print(f"Explicit 0.75 confidence: {_confidence_display(0.75)}")
-print(f"Explicit 85 confidence (already %): {_confidence_display(85)}")
-print()
 
-# Test 2: Category emoji mapping
-print("=" * 60)
-print("Test 2: Category Emoji Mapping")
-print("=" * 60)
-for cat in ["Safe", "Spam", "Harassment", "Hate Speech", "Threat", "Possible Defamation"]:
-    print(f"{cat:20s} → {_category_emoji(cat)}")
-print()
+def test_confidence_display_category_mapping():
+    """Confidence rules return correct % per category when no explicit value given."""
+    assert _confidence_display(None, "Threat") == "95%"
+    assert _confidence_display(None, "Hate Speech") == "92%"
+    assert _confidence_display(None, "Harassment") == "90%"
+    assert _confidence_display(None, "Spam") == "85%"
+    assert _confidence_display(None, "Safe") == "99%"
 
-# Test 3: Truncation at 60 chars
-print("=" * 60)
-print("Test 3: Truncation at 60 Characters")
-print("=" * 60)
-long_text = "This is a really long comment that should be truncated to 60 characters with an ellipsis at the end"
-truncated = _truncate(long_text, 60)
-print(f"Original ({len(long_text)} chars): {long_text}")
-print(f"Truncated ({len(truncated)} chars): {truncated}")
-print()
 
-# Test 4: Entity extraction
-print("=" * 60)
-print("Test 4: Entity Extraction")
-print("=" * 60)
-test_comment = """
-Contact us at support@example.com or visit https://www.example.com
-Follow us @company and use #marketing
-Call 555-123-4567 for more info
-"""
-entities = _extract_entities_from_text(test_comment)
-for entity_type, values in entities.items():
-    if values:
-        print(f"{entity_type:10s}: {', '.join(values)}")
-print()
+def test_confidence_display_explicit_values():
+    """Explicit float/int confidence values are formatted correctly."""
+    assert _confidence_display(0.75) == "75%"
+    assert _confidence_display(0.95) == "95%"
 
-print("✅ All validation tests passed!")
+
+def test_category_emoji_mapping():
+    """Every known category returns a non-empty emoji string."""
+    for cat in ["Safe", "Spam", "Harassment", "Hate Speech", "Threat", "Possible Defamation"]:
+        emoji = _category_emoji(cat)
+        assert emoji, f"Expected emoji for category '{cat}', got empty string"
+
+
+def test_truncate_long_text():
+    """Text longer than limit is truncated and ends with ellipsis."""
+    long_text = "This is a really long comment that should be truncated to 60 characters with an ellipsis at the end"
+    truncated = _truncate(long_text, 60)
+    assert len(truncated) <= 63, "Truncated text should not exceed limit + ellipsis length"
+    assert "…" in truncated or "..." in truncated, "Truncated text should contain ellipsis"
+
+
+def test_truncate_short_text():
+    """Text shorter than limit is returned unchanged."""
+    short = "Hello world"
+    assert _truncate(short, 60) == short
+
+
+def test_entity_extraction():
+    """Entity extractor finds emails, URLs, mentions, hashtags, and phones."""
+    test_comment = (
+        "Contact us at support@example.com or visit https://www.example.com "
+        "Follow us @company and use #marketing. Call 555-123-4567."
+    )
+    entities = _extract_entities_from_text(test_comment)
+
+    assert "support@example.com" in entities.get("email", [])
+    assert any("example.com" in url for url in entities.get("url", []))
+
